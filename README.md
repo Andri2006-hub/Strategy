@@ -181,7 +181,7 @@ Essas melhorias demonstram a importância prática dos princípios SOLID e dos p
 
 ---
 
-✍️ Autor
+✍️ AUTOR
 
 [Andri Santana Bezerra]
 Disciplina: Padrões de Projeto / Engenharia de Software
