@@ -1,0 +1,164 @@
+class Pedido:
+    def __init__(self, itens, cliente, presente=False):
+        self.itens = itens  # lista de dicts: {"nome":..., "preco":..., "qtd":...}
+        self.cliente = cliente
+        self.presente = presente
+        self.estrategia_pagamento = None
+        self.estrategia_frete = None
+
+    def valor_base(self):
+        return sum(i["preco"] * i.get("qtd", 1) for i in self.itens)
+
+    def set_pagamento(self, estrategia):
+        self.estrategia_pagamento = estrategia
+
+    def set_frete(self, estrategia):
+        self.estrategia_frete = estrategia
+
+    def processar_pagamento(self, valor):
+        if not self.estrategia_pagamento:
+            raise RuntimeError("Nenhuma estratégia de pagamento configurada")
+        return self.estrategia_pagamento.processar(self, valor)
+
+from abc import ABC, abstractmethod
+
+class EstrategiaPagamento(ABC):
+    @abstractmethod
+    def processar(self, pedido, valor_total):
+        pass
+
+class PagamentoPix(EstrategiaPagamento):
+    def processar(self, pedido, valor_total):
+        # Simula processamento Pix com desconto aplicado externamente via decorator
+        return {"sucesso": True, "meio": "pix", "valor_pago": valor_total}
+
+class PagamentoCredito(EstrategiaPagamento):
+    def __init__(self, parcelas=1):
+        self.parcelas = parcelas
+
+    def processar(self, pedido, valor_total):
+        # Simula processamento cartão
+        return {"sucesso": True, "meio": "credito", "parcelas": self.parcelas, "valor_pago": valor_total}
+    from abc import ABC, abstractmethod
+
+class EstrategiaFrete(ABC):
+    @abstractmethod
+    def calcular(self, pedido):
+        pass
+
+class FreteNormal(EstrategiaFrete):
+    def calcular(self, pedido):
+        peso = sum(i.get("peso", 0.5) * i.get("qtd",1) for i in pedido.itens)
+        return max(10.0, 2.0 * peso)
+
+class FreteExpresso(EstrategiaFrete):
+    def calcular(self, pedido):
+        peso = sum(i.get("peso", 0.5) * i.get("qtd",1) for i in pedido.itens)
+        return max(25.0, 5.0 * peso)
+    from abc import ABC, abstractmethod
+from typing import Protocol
+from .pedido import Pedido
+
+# Interface para calculadores de valor do pedido
+class CalculadorValor(ABC):
+    @abstractmethod
+    def calcular(self) -> float:
+        pass
+
+class CalculadorPedido(CalculadorValor):
+    def __init__(self, pedido: Pedido):
+        self.pedido = pedido
+
+    def calcular(self) -> float:
+        return round(self.pedido.valor_base(), 2)
+
+# Decorator base
+class DecoratorCalculador(CalculadorValor):
+    def __init__(self, componente: CalculadorValor):
+        self._componente = componente
+
+    def calcular(self) -> float:
+        return self._componente.calcular()
+
+# Desconto Pix como Decorator (ex: 5% de desconto)
+class DescontoPix(DecoratorCalculador):
+    def __init__(self, componente: CalculadorValor, desconto_percent: float = 5.0):
+        super().__init__(componente)
+        self.desconto_percent = desconto_percent
+
+    def calcular(self) -> float:
+        valor = super().calcular()
+        desconto = valor * (self.desconto_percent / 100.0)
+        return round(valor - desconto, 2)
+
+# Taxa de embalagem para presente como Decorator
+class TaxaEmbalagemPresente(DecoratorCalculador):
+    def __init__(self, componente: CalculadorValor, taxa: float = 5.0):
+        super().__init__(componente)
+        self.taxa = taxa
+
+    def calcular(self) -> float:
+        valor = super().calcular()
+        # Só aplica se pedido for marcado como presente (temos acesso via CalculadorPedido)
+        # tenta extrair pedido do componente se possível
+        pedido = getattr(self._componente, "pedido", None)
+        if pedido and getattr(pedido, "presente", False):
+            return round(valor + self.taxa, 2)
+        return valor
+    from typing import List, Dict
+
+class SistemaEstoque:
+    def reservar(self, itens: List[Dict]) -> bool:
+        # Simula reserva; em real integraria estoque físico
+        # Aqui retornamos True para sucesso
+        return True
+
+class GeradorNotaFiscal:
+    def gerar(self, pedido, pagamento_info: Dict) -> Dict:
+        # Simula geração de nota fiscal simples
+        total = pagamento_info.get("valor_pago", 0.0)
+        return {
+            "nota_id": "NF-1001",
+            "cliente": pedido.cliente,
+            "itens": pedido.itens,
+            "total": total,
+        }
+
+class SistemaNotificacao:
+    def notificar_cliente(self, cliente: Dict, mensagem: str) -> None:
+        # Simula envio de notificação
+        pass
+    from .pedido import Pedido
+from .decorators import CalculadorValor
+from .subsistemas import SistemaEstoque, GeradorNotaFiscal, SistemaNotificacao
+
+class CheckoutFacade:
+    def __init__(self, estoque: SistemaEstoque = None, nf: GeradorNotaFiscal = None, notify: SistemaNotificacao = None):
+        self.estoque = estoque or SistemaEstoque()
+        self.nf = nf or GeradorNotaFiscal()
+        self.notify = notify or SistemaNotificacao()
+
+    def concluir_transacao(self, pedido: Pedido, calculador: CalculadorValor) -> dict:
+        # 1) calcular valor do pedido (possíveis decorators aplicados)
+        valor_produtos = calculador.calcular()
+        # 2) calcular frete via estratégia do pedido
+        frete = pedido.calcular_frete()
+        total = round(valor_produtos + frete, 2)
+        # 3) processar pagamento via estratégia
+        pagamento_info = pedido.processar_pagamento(total)
+        if not pagamento_info.get("sucesso", False):
+            return {"sucesso": False, "motivo": "Pagamento recusado"}
+
+        # 4) reservar estoque
+        estoque_ok = self.estoque.reservar(pedido.itens)
+        if not estoque_ok:
+            return {"sucesso": False, "motivo": "Falha ao reservar estoque"}
+
+        # 5) gerar nota fiscal
+        nota = self.nf.gerar(pedido, pagamento_info)
+        # 6) notificar cliente (assíncrono em sistema real)
+        self.notify.notificar_cliente(pedido.cliente, "Pedido confirmado: " +   
+            str(nota["nota_id"]))
+        return {"sucesso": True, "nota_fiscal": nota, "pagamento": pagamento_info}
+    
+    
